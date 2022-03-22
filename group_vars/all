@@ -1,0 +1,5 @@
+---
+
+# Path to Azure CLI
+az_path: /usr/local/bin/
+shell: /bin/bash

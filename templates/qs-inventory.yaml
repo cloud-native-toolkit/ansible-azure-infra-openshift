@@ -1,0 +1,10 @@
+# Default (empty) cloud inventory
+# Empty items in this list will be created
+
+arch_type: 'Quickstart'
+inventory:
+  prereqs: []
+  resource_group: []
+  vnet: []
+  subnets: []
+  aro: []

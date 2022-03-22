@@ -1,0 +1,35 @@
+---
+
+shell: /bin/bash
+az_path: /usr/local/bin/
+
+provider_list:
+- Microsoft.RedHatOpenShift
+- Microsoft.Storage
+- Microsoft.Compute
+- Microsoft.Authorization
+
+feature_list: []
+
+subnet_list:
+- 'master-subnet'
+- 'worker-subnet'
+
+apiserver_visibility: Public
+ingress_visibility: Public
+
+worker_count: 2
+worker-vm-size: 'Standard_D4s_v3'
+worker-vm-disk-size-gb: 128
+master-vm-size: 'Standard_D8s_v3'
+service-cidr: 172.30.0.0/16
+pod-cidr: 10.128.0.0/14
+wait: no
+
+# The following parameters are used to check for cluster creation status.
+retry_delay: 120
+retry_count: 30
+
+# The following parameters are used to pause for subnet provisioning
+subnet_delay: 30
+subnet_retries: 2

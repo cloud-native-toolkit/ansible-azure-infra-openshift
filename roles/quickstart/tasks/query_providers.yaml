@@ -1,0 +1,42 @@
+---
+
+# Query Azure for list of providers against subscription and status of each.
+# Not doing JMESpath query within az CLI query as it takes longer than getting a dump of all of them then performing query locally.
+#
+- name: Query provider status
+  shell: |
+    set timeout 300
+
+    {{az_path}}az provider list \
+    --subscription '{{inventory.inputs.subscription_id}}' \
+    -o json 
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  register: response
+  failed_when: response.stderr | length > 0
+
+- name: Set fact from provider query
+  set_fact:
+    providers: "{{response.stdout | from_json}}"
+
+- name: Query provider list for required providers
+  set_fact:
+    provider_status: "{{provider_status | default([]) + [provider_data]}}"
+  vars:
+    provider_data:
+      namespace: "{{providers | json_query(query1) | first}}"
+      state: "{{providers | json_query(query2) | first}}"
+    query1: "[?namespace == '{{item}}'].namespace"
+    query2: "[?namespace == '{{item}}'].registrationState"
+  loop: "{{provider_list}}"
+
+- name: Cater for no providers required
+  set_fact:
+    provider_status: []
+  when: provider_list | length == 0
+
+- name: Update inventory with provider status
+  set_fact:
+    inventory: "{{inventory | combine({'prereqs':{'providers':provider_status}}, recursive=True)}}"

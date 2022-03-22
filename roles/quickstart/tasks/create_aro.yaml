@@ -1,0 +1,91 @@
+---
+
+# Check is cluster already exists and get details if it does
+- name: Query if ARO cluster already exists
+  shell: |
+    set timeout 300
+
+    {{az_path}}az aro show \
+    --name {{inventory.inputs.cluster_name}} \
+    --resource-group {{inventory.resource_group.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+
+- name: Set fact from response if any
+  set_fact:
+    query_data: "{{response.stdout | from_json if(response.stdout | length > 0) else []}}"
+
+- name: Set fact on cluster existence (or not)
+  set_fact:
+    aro_exists: "{{True if(query_data | length > 0) else False}}"
+
+# Create the cluster if it does not exist
+- name: Create the ARO cluster if it does not exist
+  shell: |
+    set timeout 300
+
+    echo {{az_path}}az aro create \
+    --name {{inventory.inputs.cluster_name}} \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet {{inventory.vnet.name}} \
+    --master-subnet {{inventory.subnets | json_query("[?contains(@,'master')].name") | first}} \
+    --worker-subnet {{inventory.subnets | json_query("[?contains(@,'worker')].name") | first}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    --worker-count {{worker_count}} \
+    --pull-secret {{inventory.inputs.secret_file_path}} \
+    {{'--no-wait' if(not wait) else ''}} 
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: not aro_exists
+
+- name: Wait for cluster to complete creation (or get details of existing cluster)
+  shell: |
+    set timeout 300
+
+    {{az_path}}az aro list \
+    --resource-group {{inventory.resource_group.name}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  until: response.stdout | from_json | json_query("[?name == '{{inventory.inputs.cluster_name}}'].provisioningState") | first == "Succeeded"
+  retries: "{{retry_count}}"
+  delay: "{{retry_delay}}"
+
+# Collect cluster details if it was collected
+
+- name: Set fact from response
+  set_fact:
+    response_data: "{{response.stdout | from_json | json_query(query)| first }}"
+  vars:
+    query: "[?name == '{{inventory.inputs.cluster_name}}']"
+
+# Update inventory
+
+- name: Update inventory with ARO details
+  set_fact: 
+    inventory: "{{inventory | combine({'aro':aro_data}, recursive=True)}}"
+  vars:
+    aro_data:
+      name: "{{response_data.name}}"
+      console: "{{response_data.consoleProfile.url}}"
+      version: "{{response_data.clusterProfile.version}}"
+      pod_cidr: "{{response_data.networkProfile.podCidr}}"
+      service_cidr: "{{response_data.networkProfile.serviceCidr}}"
+      state: "{{response_data.provisioningState}}"
+      master_nodes: "{{response_data.masterProfile}}"
+      worker_nodes: "{{response_data.workerProfiles}}"

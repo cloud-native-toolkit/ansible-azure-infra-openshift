@@ -1,0 +1,69 @@
+---
+
+# Check features are registered
+- name: Query features
+  include_tasks:
+    file: query_features.yaml
+
+- name: Determine if any features are not registered
+  set_fact:
+    unregistered_feature: "{{True if(inventory.prereqs.features | json_query(query) | length > 0) else False}}"
+  vars:
+    query: "[?state != 'Registered'].name"
+
+- name: Register required features if not already
+  shell: |
+    set timeout 300
+
+    {{az_path}}az feature register \
+    --namespace {{item.namespace}} \
+    --name {{item.name}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  register: response
+  when: item.state != "Registered" and unregistered_feature
+  loop: "{{inventory.prereqs.features}}"
+  loop_control:
+    label: "{{item.namespace}}"
+
+- name: Query features and update status if had to register features
+  include_tasks:
+    file: query_features.yaml
+  when: unregistered_feature
+
+# Check providers
+- name: Query providers
+  include_tasks:
+    file: query_providers.yaml
+
+- name: Determine if any providers are not registered
+  set_fact:
+    unregistered_provider: "{{True if(inventory.prereqs.providers | json_query(query)) else False}}"
+  vars:
+    query: "[?state != 'Registered'].namespace"
+
+- name: Register providers if any unregistered
+  shell: |
+    set timeout 300
+
+    {{az_path}}az provider register \
+    --namespace {{item.namespace}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    --wait 
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  register: response
+  when: item.state != "Registered" and unregistered_provider
+  loop: "{{inventory.prereqs.providers}}"
+  loop_control:
+    label: "{{item.namespace}}"  
+
+- name: Update provider status if had to register any
+  include_tasks:
+    file: query_providers.yaml
+  when: unregistered_provider

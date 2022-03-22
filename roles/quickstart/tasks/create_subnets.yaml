@@ -1,0 +1,183 @@
+---
+
+# Split vnet CIDR into subnets
+- name: Split vnet CIDR into subnet CIDRs
+  script: ../files/split-subnet.py --cidr {{inventory.inputs.vnet_cidr}} --prefix {{inventory.inputs.subnet_prefix}} --count {{subnet_list | length}}
+  register: cidrReturn
+  failed_when:
+  - cidrReturn.stdout_lines | length < subnet_list | length
+
+- name: Set fact with subnet CIDRs
+  set_fact:
+    subnet_cidrs: "{{cidrReturn.stdout_lines}}"
+
+- name: Set master subnet name if provided
+  set_fact:
+    master_subnet_name: "{{subnet_list | json_query(query) | first}}"
+  vars:
+    query: "[?contains(@,'master')]"
+  failed_when: subnet_list | json_query("[?contains(@,'master')]") | length > 1
+  when: subnet_list | json_query("[?contains(@,'master')]") | length > 0
+
+
+# Query for existing subnets
+- name: Query existing subnets
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet subnet list \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet-name {{inventory.vnet.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+
+- name: Set fact from query response
+  set_fact:
+    query_data: "{{response.stdout | from_json if(response.stdout | length > 0) else []}}"
+
+- name: Parse query data for required subnets
+  set_fact:
+    subnets: "{{subnets | default([]) + [subnet_details]}}"
+  vars:
+    subnet_details:
+      name: "{{item}}"
+      cidr: "{{subnet_cidrs[idx]}}"
+      exists: "{{True if(query_data | json_query(query_name) | length > 0) else False}}"
+    query_name: "[?name == '{{item}}']"
+  loop: "{{subnet_list}}"
+  loop_control:
+    index_var: idx
+
+# Create any missing subnets
+- name: Create missing subnets
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet subnet create \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet-name {{inventory.vnet.name}} \
+    --name {{item.name}} \
+    --address-prefixes {{item.cidr}} \
+    --service-endpoints Microsoft.ContainerRegistry \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: not item.exists
+  loop: "{{subnets}}"
+  loop_control:
+    label: "{{item.name}}"
+  
+# Get details of subnets if any had to be created (to get id etc)
+- name: Query subnet details if any had to be created
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet subnet list \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet-name {{inventory.vnet.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: subnets | json_query('[?exists == false]') | length > 0
+  until: response.stdout | from_json | json_query("[?provisioningState == 'Succeeded']") | length < subnet_list | length
+  retries: "{{subnet_retries}}"
+  delay:  "{{subnet_delay}}"
+
+- name: Set fact from subnet query (overwrite prior query if created new subnets)
+  set_fact:
+    query_data: "{{response.stdout | from_json}}"
+  when: subnets | json_query('[?exists == false]') | length > 0
+
+# Disable private endpoint policies on the master subnet
+
+- name: Check if master subnet has private link service network policies disabled
+  set_fact: 
+    master_policies: "{{query_data | json_query(query) | first}}"
+  vars:
+    query: "[?name == '{{master_subnet_name}}'].privateLinkServiceNetworkPolicies"
+  when: master_subnet_name is defined
+
+- name: Disable private endpoint on master subnet
+  shell : |
+    set timeout 300
+
+    {{az_path}}az network vnet subnet update \
+    --name {{subnet_list | json_query("[?contains(@,'master')]") | first}} \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet-name {{inventory.vnet.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    --disable-private-link-service-network-policies true
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: 
+    - master_subnet_name is defined
+    - master_policies == 'Enabled' 
+
+- name: Query subnet details if any had to be updated
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet subnet list \
+    --resource-group {{inventory.resource_group.name}} \
+    --vnet-name {{inventory.vnet.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: 
+    - master_subnet_name is defined
+    - master_policies == 'Enabled'  
+
+- name: Set fact from subnet query (overwrite prior query if created new subnets)
+  set_fact:
+    query_data: "{{response.stdout | from_json}}"
+  when: 
+    - master_subnet_name is defined
+    - master_policies == 'Enabled'  
+
+# Update inventory
+- name: Create dictionary of subnet details
+  set_fact:
+    subnet_details: "{{subnet_details | default([]) + [{'name':name,'id':id,'cidr':cidr,'state':state,'type':type,'privateLinkServiceNetworkPolicies':policy}]}}"
+  vars:
+    name: "{{item.name}}"
+    id: "{{item.id}}"
+    cidr: "{{item.addressPrefix}}"
+    state: "{{item.provisioningState}}"
+    policy: "{{item.privateLinkServiceNetworkPolicies}}"
+    type: "{{item.type}}"
+  loop: "{{query_data}}"
+  loop_control:
+    label: "{{item.name}}"
+
+- name: Populate inventory with subnet details
+  set_fact:
+    inventory: "{{inventory | combine({'subnets':subnet_details}, recursive=True)}}"
+

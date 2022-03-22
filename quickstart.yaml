@@ -1,0 +1,113 @@
+---
+
+- name: Create a VPC and OpenShift cluster on Azure with Ansible per the quickstart reference architecture
+  hosts: localhost
+
+  vars:
+    vnetCIDR: 10.0.0.0/22
+    subnetPrefix: 23
+    locationId: australiaeast
+    resourceGroupName: recloud-rg
+    vnetName: recloud-vnet
+    clusterName: recloud-aro
+    secretFile: './pull-secret.txt'
+    # Uncomment the below lines to set your subscription and tenant id if you are using more than one
+    # subscriptionId: fe1234-ab12-bcde-123456789
+    # tenant_id: fce12345-4356-1234-6789-abcdef12345
+    # Override the defaults by uncommenting and changing the below
+    # worker_count: 2
+    # worker-vm-size: 
+    # worker-vm-disk-size-gb: 
+    # master-vm-size:
+    # service-cidr: 
+    # pod-cidr: 
+
+  tasks:
+
+    - name: Get the current time
+      command: date
+      register: dateResponse
+
+    - name: Record current date
+      set_fact:
+        start_time: '{{dateResponse.stdout_lines[0]}}'
+
+    - name: Check if the secret file exists
+      stat: 
+        path: "{{secretFile}}"
+      register: secret_file
+    
+    - name: Fail if the pull secret file does not exist
+      fail:
+        msg: "ERROR: Please check that the pull secret file {{secretFile}} exists."
+      when: not secret_file.stat.exists
+
+    - name: Check if inventory file exists
+      stat:
+        path: ./inventory.yaml
+      register: inv_file
+
+    - name: Read inventory template
+      include_vars:
+        file: '{{"./inventory.yaml" if(inv_file.stat.exists) else "./templates/qs-inventory.yaml"}}'
+
+    - name: Fail if existing inventory is not for quick start architecture
+      fail: 
+        msg: "ERROR: Existing inventory is not for quick start architecture"
+      when: (arch_type != 'Quickstart')
+
+    - name: Get subscription id if not provided as a variable
+      shell: |
+        set timeout 300
+
+        {{az_path}}az account list -o json
+
+        exit 0
+      when: subscriptionId is not defined
+      register: response
+      failed_when: response.stderr | length > 0
+
+    - name: Read query return
+      set_fact: 
+        subscription_info: "{{response.stdout | from_json}}"
+      when: subscriptionId is not defined
+
+    - name: Add inputs to inventory
+      set_fact:
+        inventory: "{{inventory | combine({'inputs':input_data}, recursive=True)}}"
+      vars:
+        input_data:
+          subscription_id: "{{subscriptionId if(subscription_id is defined) else subscription_info[0].id}}"
+          subscription_default: "{{True if(subscriptionId is not defined) else False}}"
+          location: "{{locationId}}"
+          rg_name: "{{resourceGroupName|lower}}"
+          vnet_name: "{{vnetName|lower}}"
+          vnet_cidr: "{{vnetCIDR}}"
+          subnet_prefix: "{{subnetPrefix}}"
+          cluster_name: "{{clusterName}}"
+          secret_file_path: "{{secret_file.stat.path}}"
+
+    - name: Create the Virtual Network, ROSA cluster and associated services
+      include_role:
+        name: quickstart
+
+    - name: Record current date
+      set_fact:
+        end_time: '{{dateResponse.stdout_lines[0]}}'
+
+    - name: Update last update time to inventory
+      set_fact:
+        inventory: "{{inventory | combine({'Last_Update':end_time}, recursive=True)}}"
+
+    - name: Write updated inventory file
+      template:
+        src: ./templates/inventory.j2
+        dest: ./inventory.yaml
+
+    - debug:
+        msg: [
+            "Start time was {{start_time}}",
+            "End time was {{end_time}}",
+            "Inventory => ",
+            "{{inventory}}"    
+        ]

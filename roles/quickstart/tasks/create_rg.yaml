@@ -1,0 +1,74 @@
+---
+
+- name: Query if resource group already exists
+  shell: |
+    set timeout 300
+
+    {{az_path}}az group exists \
+    --name {{inventory.inputs.rg_name}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+
+- name: Set fact from response
+  set_fact:
+    rg_exists: "{{response.stdout | from_json}}"
+
+- name: Query details of existing resource group
+  shell: |
+    set timeout 300
+
+    {{az_path}}az group show \
+    --name {{inventory.inputs.rg_name}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: rg_exists
+
+- name: Set fact with existing resource group details
+  set_fact:
+    rg_existing: "{{response.stdout | from_json}}"
+  when: rg_exists
+
+- name: Create resource group if it does not exist
+  shell: |
+    set timeout 300
+
+    {{az_path}}az group create \
+    --location {{inventory.inputs.location}} \
+    --name {{inventory.inputs.rg_name}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+  failed_when: response.stderr | length > 0
+  when: not rg_exists
+
+- name: Set fact from reponse
+  set_fact:
+    rg_created: "{{response.stdout | from_json}}"
+  when: not rg_exists
+
+- name: Update inventory with resource group data
+  set_fact:
+    inventory: "{{inventory | combine({'resource_group':rg_data}, recursive=True)}}"
+  vars:
+    rg_data:
+      name: "{{rg_created.name if(rg_created is defined) else rg_existing.name}}"
+      id: "{{rg_created.id if(rg_created is defined) else rg_existing.id}}"
+      location: "{{rg_created.location if(rg_created is defined) else rg_existing.location}}"
+      state: "{{rg_created.properties.provisioningState if(rg_created is defined) else rg_existing.properties.provisioningState}}"
+      type: "{{rg_created.type if(rg_created is defined) else rg_existing.type}}"

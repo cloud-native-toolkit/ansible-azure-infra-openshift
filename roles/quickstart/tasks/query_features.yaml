@@ -1,0 +1,44 @@
+---
+
+# Check features are registered
+# Not doing JMESpath query within az CLI query as it takes longer than getting a dump of all of them then performing query locally.
+#
+- name: Query features
+  shell: |
+    set timeout 300
+
+    {{az_path}}az feature list \
+    --subscription {{inventory.inputs.subscription_id}} \
+    -o json
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  register: response
+  delegate_to: localhost
+  failed_when: response.stderr | length > 0
+
+- name: Set fact from feature query
+  set_fact:
+    features: "{{response.stdout | from_json}}"
+
+- name: Query feature list for required features
+  set_fact:
+    feature_status: "{{feature_status | default([]) + [feature_data]}}"
+  vars:
+    feature_data:
+      name: "{{features | json_query(query1) | first | split('/') | last}}"
+      namespace: "{{features | json_query(query1) | first | split('/') | first}}"
+      state: "{{features | json_query(query2) | first}}"
+    query1: "[?name == '{{item}}'].name"
+    query2: "[?name == '{{item}}'].properties.state"
+  loop: "{{feature_list}}"
+
+- name: Cater for no features required
+  set_fact:
+    feature_status: []
+  when: feature_list | length == 0
+
+- name: Add feature status to inventory
+  set_fact:
+    inventory: "{{inventory | combine({'prereqs':{'features':feature_status}}, recursive=True)}}"

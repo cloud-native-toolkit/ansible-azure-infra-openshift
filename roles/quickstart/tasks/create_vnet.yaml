@@ -1,0 +1,59 @@
+---
+
+- name: Query existing vnets
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet show \
+    --resource-group {{inventory.resource_group.name}} \
+    --name {{inventory.inputs.vnet_name}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  register: response
+
+- set_fact:
+    query_data: "{{response.stdout | from_json if(response.stdout | length > 0) else []}}"
+
+- name: Set fact on vnet existence
+  set_fact:
+    vnet_exists: "{{True if(query_data | length > 0) else False}}"
+
+- name: Create vnet if it does not exist
+  shell: |
+    set timeout 300
+
+    {{az_path}}az network vnet create \
+    --name {{inventory.inputs.vnet_name}} \
+    --resource-group {{inventory.resource_group.name}} \
+    --subscription {{inventory.inputs.subscription_id}} \
+    --address-prefix {{inventory.inputs.vnet_cidr}} \
+    --subscription {{inventory.inputs.subscription_id}}
+
+    exit 0
+  args:
+    executable: "{{shell}}"
+  delegate_to: localhost
+  failed_when: response.stderr | length > 0
+  register: response
+  when: not vnet_exists
+
+- name: Set fact on vnet creation response
+  set_fact:
+    vnet_create: "{{response.stdout | from_json}}"
+  when: not vnet_exists
+
+- name: Update inventory with vnet details
+  set_fact:
+    inventory: "{{inventory | combine({'vnet':vnet_details}, recursive=True)}}"
+  vars:
+    vnet_details:
+      name: "{{vnet_create.newVNet.name if(not vnet_exists) else query_data.name}}"
+      id: "{{vnet_create.newVNet.id if(not vnet_exists) else query_data.id}}"
+      resource_group: "{{vnet_create.newVNet.resourceGroup if(not vnet_exists) else query_data.resourceGroup}}"
+      cidr: "{{vnet_create.newVNet.addressSpace.addressPrefixes[0] if(not vnet_exists) else query_data.addressSpace.addressPrefixes[0]}}"
+      type: "{{vnet_create.newVNet.type if(not vnet_exists) else query_data.type}}"
+      state: "{{vnet_create.newVNet.provisioningState if(not vnet_exists) else query_data.provisioningState}}"

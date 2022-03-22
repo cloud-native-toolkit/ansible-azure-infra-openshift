@@ -1,0 +1,49 @@
+---
+
+# Check providers and features
+- name: Check features and providers are registered
+  include_tasks:
+    file: ./prereqs.yaml
+  when: inventory.prereqs is defined and inventory.prereqs | length == 0
+
+# Create resource group
+- name: Create resource group
+  include_tasks:
+    file: create_rg.yaml
+  when:
+    - inventory.resource_group is defined  
+    - inventory.resource_group | length == 0 
+    - inventory.prereqs is defined and inventory.prereqs | length > 0
+
+# Create virtual network
+- name: Create virtual network
+  include_tasks:
+    file: create_vnet.yaml
+  when:
+    - inventory.vnet is defined  
+    - inventory.vnet | length == 0  
+    - inventory.prereqs is defined and inventory.prereqs | length > 0 
+    - inventory.resource_group is defined and inventory.resource_group | length > 0
+
+# Create subnets
+- name: Create subnets
+  include_tasks:
+    file: create_subnets.yaml
+  when:
+    - inventory.subnets is defined 
+    - inventory.subnets | length == 0 
+    - inventory.vnet is defined and inventory.vnet | length > 0  
+    - inventory.prereqs is defined and inventory.prereqs | length > 0 
+    - inventory.resource_group is defined and inventory.resource_group | length > 0 
+
+# Create ARO
+- name: Create Azure Red Hat OpenShift cluster
+  include_tasks:
+    file: create_aro.yaml
+  when:
+    - inventory.aro is defined
+    - inventory.aro | length == 0
+    - inventory.vnet is defined and inventory.vnet | length > 0
+    - inventory.prereqs is defined and inventory.prereqs | length > 0 
+    - inventory.resource_group is defined and inventory.resource_group | length > 0 
+    - inventory.subnets is defined and inventory.subnets | length > 0
