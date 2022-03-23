@@ -30,15 +30,20 @@
   shell: |
     set timeout 300
 
-    echo {{az_path}}az aro create \
+    {{az_path}}az aro create \
     --name {{inventory.inputs.cluster_name}} \
     --resource-group {{inventory.resource_group.name}} \
     --vnet {{inventory.vnet.name}} \
-    --master-subnet {{inventory.subnets | json_query("[?contains(@,'master')].name") | first}} \
-    --worker-subnet {{inventory.subnets | json_query("[?contains(@,'worker')].name") | first}} \
+    --master-subnet {{inventory.subnets | json_query(master_query) | first}} \
+    --worker-subnet {{inventory.subnets | json_query(worker_query) | first }} \
     --subscription {{inventory.inputs.subscription_id}} \
+    --worker-vm-size {{worker_vm_size}} \
+    --worker-vm-disk-size-gb {{worker_vm_disk_size_gb}} \
+    --master-vm-size {{master_vm_size}} \
+    --service-cidr {{service_cidr}} \
+    --pod-cidr {{pod_cidr}} \
     --worker-count {{worker_count}} \
-    --pull-secret {{inventory.inputs.secret_file_path}} \
+    {{'--pull-secret @' + inventory.inputs.secret_file_path if(inventory.inputs.secret_file_path is defined) else ''}} \
     {{'--no-wait' if(not wait) else ''}} 
 
     exit 0
@@ -46,6 +51,9 @@
     executable: "{{shell}}"
   delegate_to: localhost
   register: response
+  vars:
+    master_query: "[?aro_type == 'master'].name"
+    worker_query: "[?aro_type == 'worker'].name"
   failed_when: response.stderr | length > 0
   when: not aro_exists
 

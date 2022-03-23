@@ -12,18 +12,21 @@ provider_list:
 feature_list: []
 
 subnet_list:
-- 'master-subnet'
-- 'worker-subnet'
+- name: 'master-subnet'
+  aro_type: 'master'
+- name: 'worker-subnet'
+  aro_type: 'worker'
 
 apiserver_visibility: Public
 ingress_visibility: Public
 
-worker_count: 2
-worker-vm-size: 'Standard_D4s_v3'
-worker-vm-disk-size-gb: 128
-master-vm-size: 'Standard_D8s_v3'
-service-cidr: 172.30.0.0/16
-pod-cidr: 10.128.0.0/14
+# Minimum worker count is 3
+worker_count: 3
+worker_vm_size: 'Standard_D4s_v3'
+worker_vm_disk_size_gb: 128
+master_vm_size: 'Standard_D8s_v3'
+service_cidr: 172.30.0.0/16
+pod_cidr: 10.128.0.0/14
 wait: no
 
 # The following parameters are used to check for cluster creation status.

@@ -11,6 +11,7 @@
     vnetName: recloud-vnet
     clusterName: recloud-aro
     secretFile: './pull-secret.txt'
+    az_path: /opt/homebrew/bin/
     # Uncomment the below lines to set your subscription and tenant id if you are using more than one
     # subscriptionId: fe1234-ab12-bcde-123456789
     # tenant_id: fce12345-4356-1234-6789-abcdef12345
