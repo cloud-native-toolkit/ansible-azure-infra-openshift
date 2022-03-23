@@ -52,6 +52,7 @@ This architecture consists of the following bill of materials:
 
 1. Output will show the inventory of what was created, such as the below.
 
+    ```
     arch_type: 'Quickstart'
     inventory:
         Last_Update: Wed 23 Mar 2022 12:02:16 AEDT
